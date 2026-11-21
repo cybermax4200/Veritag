@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MetricCardSkeleton } from "@/components/MetricCardSkeleton";
 import { QrCodeCard } from "@/components/QrCodeCard";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { PUBLIC_CONFIG } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
 
@@ -48,8 +50,10 @@ export default function BrandDashboardPage() {
   const [warrantyMonths, setWarrantyMonths] = useState(24);
   const [productSku, setProductSku] = useState("Chronos Diver 300M");
   const [notice, setNotice] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const loadBrandState = useCallback(async (token: string) => {
+    setIsLoading(true);
     try {
       const [meRes, batchesRes] = await Promise.all([
         fetch(`${PUBLIC_CONFIG.apiUrl}/v1/brands/me`, {
@@ -96,6 +100,8 @@ export default function BrandDashboardPage() {
       }
     } catch {
       // Keep preview state when offline
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
@@ -525,7 +531,13 @@ export default function BrandDashboardPage() {
         </div>
 
         <div className="lg:col-span-8 space-y-4">
-          {batches.map((b) => (
+          {isLoading ? (
+            <>
+              <MetricCardSkeleton count={3} />
+              <TableSkeleton rows={3} columns={4} />
+            </>
+          ) : (
+            batches.map((b) => (
             <div
               key={b.batchId}
               className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4"
@@ -590,7 +602,8 @@ export default function BrandDashboardPage() {
                 )}
               </div>
             </div>
-          ))}
+          ))
+          )}
         </div>
       </div>
     </div>

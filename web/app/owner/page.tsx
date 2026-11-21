@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MetricCardSkeleton } from "@/components/MetricCardSkeleton";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { PUBLIC_CONFIG } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
 
@@ -32,8 +34,10 @@ export default function OwnerPortalPage() {
   const [redeemCode, setRedeemCode] = useState("");
   const [serviceCenterAddr, setServiceCenterAddr] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const loadOwnerUnits = useCallback(async (address: string, token: string) => {
+    setIsLoading(true);
     try {
       const res = await fetch(`${PUBLIC_CONFIG.apiUrl}/v1/owners/${encodeURIComponent(address)}/units`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -63,6 +67,8 @@ export default function OwnerPortalPage() {
       }
     } catch {
       // Keep demo items when offline
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
@@ -245,7 +251,13 @@ export default function OwnerPortalPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
-          {products.map((item) => (
+          {isLoading ? (
+            <>
+              <MetricCardSkeleton count={2} />
+              <TableSkeleton rows={3} columns={3} />
+            </>
+          ) : (
+            products.map((item) => (
             <div
               key={item.unitId}
               className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4"
@@ -296,7 +308,8 @@ export default function OwnerPortalPage() {
                 </div>
               )}
             </div>
-          ))}
+          ))
+          )}
         </div>
 
         <form
