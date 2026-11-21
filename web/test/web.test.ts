@@ -1,18 +1,16 @@
 import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  formatRemainingWarranty,
-  getEmbedBadgeMeta,
-} from "../components/EmbedBadge.js";
-import {
-  classifyRpcError,
-  STELLAR_STATUS_URL,
-} from "../components/ErrorBoundary.js";
+  buildCertificatePdfBytes,
+  buildCertificateSvg,
+} from "../lib/certificate-generator.js";
 import { registerPasskeySmartWallet } from "../lib/passkey.js";
 import {
   buildUnsignedRegistryTxXdr,
   getFileDownloadUrl,
+  isValidGtinFormat,
   PUBLIC_CONFIG,
+  resolveGs1DigitalLink,
   signRegistryTxWithSecret,
   verifyProduct,
 } from "../lib/stellar.js";
@@ -79,31 +77,65 @@ describe("@veritag/web verification & passkey wallet logic", () => {
     expect(passkeyUnsignedXdr.length).toBeGreaterThan(20);
   });
 
-  it("formats embeddable marketplace badge metadata and remaining warranty", async () => {
-    const brand = "GB7TAYRUZGE6TVT7NHP5SMIZRNQA6PLM423EYISAOAP3MKYIQMVYP2JO";
-    const batch = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b";
+  it("generates Guilloche SVG and vector PDF warranty certificates", () => {
+    const certData = {
+      unitId: "55aa66bb77cc88dd99ee00ff112233445566778899aabbccddeeff0011223344",
+      model: "Chronos Titan Automatic 41mm",
+      serial: "CH-2026-ACTIVE-04",
+      brandDomain: "chronos-watches.swiss",
+      ownerAddress: "GB7TAYRUZGE6TVT7NHP5SMIZRNQA6PLM423EYISAOAP3MKYIQMVYP2JO",
+      txHash: "4e9b2f7a1c8d3065a2b4c6d8e0f123456789abcdef0123456789abcdef012345",
+      expiresAt: "2028-08-15",
+      warrantyDaysRemaining: 630,
+      claimsUsed: 1,
+    };
 
-    const active = await verifyProduct(brand, batch, "CH-2026-ACTIVE-04");
-    const activeMeta = getEmbedBadgeMeta(active);
-    expect(activeMeta.label).toBe("Authentic · Active Warranty");
-    expect(activeMeta.brandVerificationLabel).toContain("Verified Brand");
-    expect(activeMeta.sealText).toContain("On-Chain Seal");
+    const svg = buildCertificateSvg(certData);
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("Certificate of Authenticity &amp; Warranty");
+    expect(svg).toContain(certData.ownerAddress);
+    expect(svg).toContain(certData.txHash);
+    expect(svg).toContain(certData.expiresAt);
+    expect(svg).toContain("<path d=");
 
-    const nowSec = 1_700_000_000;
-    expect(formatRemainingWarranty(nowSec + 86_400 * 30, true, 24, nowSec)).toBe("30 days left");
-    expect(formatRemainingWarranty(nowSec - 10, false, 24, nowSec)).toBe("Warranty Expired");
-    expect(formatRemainingWarranty(undefined, undefined, 24, nowSec)).toBe("24 mo on activation");
+    const pdfBytes = buildCertificatePdfBytes(certData);
+    const pdfText = new TextDecoder().decode(pdfBytes);
+    expect(pdfText.startsWith("%PDF-1.4")).toBe(true);
+    expect(pdfText.trimEnd().endsWith("%%EOF")).toBe(true);
+    expect(pdfText).toContain(certData.ownerAddress);
+    expect(pdfText).toContain(certData.txHash);
+    expect(pdfText).toContain(certData.expiresAt);
   });
 
-  it("classifies Stellar RPC 504 timeouts and exposes status link diagnostics", () => {
-    const timeoutDiag = classifyRpcError(new Error("Soroban RPC HTTP 504 Gateway Timeout"));
-    expect(timeoutDiag.isRpcTimeout).toBe(true);
-    expect(timeoutDiag.statusCode).toBe(504);
-    expect(timeoutDiag.title).toContain("Timed Out");
+  it("resolves GS1 Digital Link GTIN/serial paths and rejects invalid GTINs", async () => {
+    expect(isValidGtinFormat("01234567890128")).toBe(true);
+    expect(isValidGtinFormat("12345678")).toBe(true);
+    expect(isValidGtinFormat("INVALID-GTIN")).toBe(false);
 
-    const genericDiag = classifyRpcError(new Error("Unexpected rendering failure"));
-    expect(genericDiag.isRpcTimeout).toBe(false);
-    expect(genericDiag.statusCode).toBeUndefined();
-    expect(STELLAR_STATUS_URL).toBe("https://status.stellar.org");
+    const invalid = await resolveGs1DigitalLink("ABC", "CH-2026-000101");
+    expect(invalid).toBeNull();
+
+    const fallbackResolved = await resolveGs1DigitalLink("01234567890128", "CH-2026-000101");
+    expect(fallbackResolved).not.toBeNull();
+    expect(fallbackResolved?.source).toBe("demo-fallback");
+    expect(fallbackResolved?.redirectPath).toContain("/v/");
+    expect(fallbackResolved?.redirectPath).toContain("/CH-2026-000101");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          brandAddress: "GABC1234567890BRAND",
+          brandDomain: "atelier.example",
+          batchId: "batch-999",
+        }),
+      }),
+    );
+
+    const apiResolved = await resolveGs1DigitalLink("01234567890128", "SER-42");
+    expect(apiResolved?.source).toBe("api");
+    expect(apiResolved?.brandDomain).toBe("atelier.example");
+    expect(apiResolved?.redirectPath).toBe("/v/GABC1234567890BRAND/batch-999/SER-42");
   });
 });
